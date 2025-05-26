@@ -2,7 +2,10 @@ import streamlit as st
 import hashlib
 from cryptography.fernet import Fernet
 
-KEY = Fernet.generate_key()
+# Generate or load a key only once per session
+if 'fernet_key' not in st.session_state:
+    st.session_state['fernet_key'] = Fernet.generate_key()
+KEY = st.session_state['fernet_key']
 cipher = Fernet(KEY)
 
 if 'stored_data' not in st.session_state:
@@ -16,14 +19,19 @@ def hash_passkey(passkey):
     return hashlib.sha256(passkey.encode()).hexdigest()
 
 def encrypt_data(text, passkey):
+    # Use both key and passkey hash for additional security (optional)
     return cipher.encrypt(text.encode()).decode()
 
 def decrypt_data(encrypted_text, passkey):
     hashed_passkey = hash_passkey(passkey)
-    for key, value in st.session_state['stored_data'].items():
-        if value['encrypted_text'] == encrypted_text and value['passkey'] == hashed_passkey:
-            st.session_state['failed_attempts'] = 0
+    # Make sure to check if encrypted_text exists
+    value = st.session_state['stored_data'].get(encrypted_text)
+    if value and value['passkey'] == hashed_passkey:
+        st.session_state['failed_attempts'] = 0
+        try:
             return cipher.decrypt(encrypted_text.encode()).decode()
+        except Exception:
+            return None
     st.session_state['failed_attempts'] += 1
     return None
 
@@ -49,6 +57,7 @@ elif choice == 'Store Data':
                 'passkey': hashed_passkey
             }
             st.success('✅ Data stored securely!')
+            st.write(f'**Save this encrypted data somewhere safe to retrieve later:**\n```\n{encrypted_text}\n```')
         else:
             st.error('⚠️ Both fields are required!')
 
@@ -66,9 +75,10 @@ elif choice == 'Retrieve Data':
                 st.success(f'✅ Decrypted Data: {decrypted_text}')
             else:
                 attempts_left = 3 - st.session_state['failed_attempts']
-                st.error(f'❌ Incorrect passkey! Attempts remaining: {attempts_left}')
+                st.error(f'❌ Incorrect passkey or data! Attempts remaining: {attempts_left}')
                 if st.session_state['failed_attempts'] >= 3:
                     st.session_state['is_logged_in'] = False
+                    st.session_state['failed_attempts'] = 0
                     st.warning('🔒 Too many failed attempts! Redirecting to Login Page.')
                     st.rerun()
         else:
